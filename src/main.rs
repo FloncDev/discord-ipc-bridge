@@ -1,4 +1,4 @@
-use discord_ipc_bridge::discord::Client;
+use discord_ipc_bridge::{discord::Client, ipc::Command};
 use tokio::sync::mpsc;
 
 #[tokio::main]
@@ -14,5 +14,5 @@ async fn main() {
         .expect("Failed to connect to Discord IPC");
 
     let (mut discord_rx, mut discord_tx) = client.to_split();
-    let (cmd_tx, cmd_rx) = mpsc::channel(32);
+    let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(32);
 }

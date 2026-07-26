@@ -5,7 +5,7 @@ pub enum Command {
     ToggleMute,
     ToggleDeafen,
     GetVoiceStatus,
-    Subscribe {},
+    Subscribe(Event),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
