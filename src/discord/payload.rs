@@ -39,3 +39,9 @@ pub enum Commands {
         deaf: bool,
     },
 }
+
+impl Commands {
+    pub fn as_payload(self) -> Payload {
+        Payload::new(self)
+    }
+}

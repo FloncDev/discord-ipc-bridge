@@ -1,4 +1,5 @@
 pub mod client;
+pub mod frames;
 pub mod payload;
 pub mod response;
 pub mod session;

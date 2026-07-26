@@ -1,12 +1,17 @@
 use serde_json::json;
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
     net::UnixStream,
+    sync::{broadcast, mpsc},
 };
 
-use crate::discord::{
-    OAuthError, Response, ResponseCommands, Session,
-    payload::{Commands, Payload},
+use crate::{
+    SharedState,
+    discord::{
+        OAuthError, Response, ResponseCommands, Session,
+        frames::{ReadError, WriteError, read_frame, write_frame},
+        payload::{Commands, Payload},
+    },
+    ipc::{Command, EventData, command::Event},
 };
 
 pub struct Client {
@@ -128,40 +133,9 @@ impl Client {
     ) {
         self.stream.into_split()
     }
-}
 
-#[derive(thiserror::Error, Debug)]
-pub enum ReadError {
-    #[error("Failed to read from stream: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Failed to parse UTF-8: {0}")]
-    Utf8(#[from] std::str::Utf8Error),
-    #[error("Failed to parse JSON: {0}")]
-    Json(#[from] serde_json::Error),
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum WriteError {
-    #[error("Failed to write to stream: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("Failed to serialize JSON: {0}")]
-    Json(#[from] serde_json::Error),
-}
-
-impl Client {
     async fn read(&mut self) -> Result<(u32, serde_json::Value), ReadError> {
-        let mut header_buf = [0; 8];
-        self.stream.read_exact(&mut header_buf).await?;
-
-        let opcode = u32::from_le_bytes(header_buf[0..4].try_into().unwrap());
-        let length = u32::from_le_bytes(header_buf[4..8].try_into().unwrap()) as usize;
-
-        let mut payload_buf = vec![0; length];
-        self.stream.read_exact(&mut payload_buf).await?;
-
-        let payload_str = std::str::from_utf8(&payload_buf)?;
-        let payload_json = serde_json::from_str(payload_str)?;
-        Ok((opcode, payload_json))
+        read_frame(&mut self.stream).await
     }
 
     async fn write(
@@ -169,14 +143,51 @@ impl Client {
         opcode: u32,
         payload: impl Into<serde_json::Value>,
     ) -> Result<(), WriteError> {
-        let payload_str = serde_json::to_string(&payload.into())?;
+        write_frame(&mut self.stream, opcode, payload).await
+    }
+}
 
-        let len = payload_str.len() as u32;
+impl Client {
+    pub async fn run(
+        self,
+        state: SharedState,
+        broadcast_tx: broadcast::Sender<EventData>,
+        mut mpsc_rx: mpsc::Receiver<Command>,
+    ) {
+        let (mut discord_rx, mut discord_tx) = self.to_split();
 
-        self.stream.write_all(&opcode.to_le_bytes()).await?;
-        self.stream.write_all(&len.to_le_bytes()).await?;
-        self.stream.write_all(payload_str.as_bytes()).await?;
+        loop {
+            tokio::select! {
+                res = read_frame(&mut discord_rx) => {
+                    if let Ok(msg) = res {
+                        // TODO: Parse message
+                        tracing::info!("Received message from Discord: {:?}", msg);
+                    }
+                }
 
-        Ok(())
+                Some(msg) = mpsc_rx.recv() => {
+                    let payload: serde_json::Value = match msg {
+                        Command::ToggleMute => {
+                            let (is_muted, is_deafend) = state.read().await.audio_status();
+
+                            Commands::SetVoiceSettings { mute: !is_muted, deaf: is_deafend }.as_payload().into()
+                        },
+                        Command::ToggleDeafen => {
+                            let (is_muted, is_deafend) = state.read().await.audio_status();
+
+                            Commands::SetVoiceSettings { mute: is_muted, deaf: !is_deafend }.as_payload().into()
+                        },
+                        Command::Subscribe(event) => {
+                            event.subscribe()
+                        },
+                        Command::Unsubscribe(event) => {
+                            event.unsubscribe()
+                        }
+                    };
+
+                    write_frame(&mut discord_tx, 1, payload).await.expect("Failed to send command to Discord");
+                }
+            }
+        }
     }
 }
