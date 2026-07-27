@@ -11,6 +11,16 @@ pub struct Response {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 #[non_exhaustive]
 pub enum Commands {
-    Authorize { code: String },
-    Error { code: u32, message: String },
+    Authorize {
+        code: String,
+    },
+    Error {
+        code: u32,
+        message: String,
+    },
+    GetSelectedVoiceChannel {
+        guild_id: Option<String>,
+        #[serde(rename = "id")]
+        channel_id: Option<String>,
+    },
 }

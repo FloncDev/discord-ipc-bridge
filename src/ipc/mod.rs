@@ -1,5 +1,4 @@
 pub mod command;
-pub mod message;
+pub mod server;
 
 pub use command::Command;
-pub use message::EventData;

@@ -1,7 +1,7 @@
 /target
 .direnv/
 .env
-
+session_cache.json
 
 # Added by cargo
 #

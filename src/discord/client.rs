@@ -7,11 +7,12 @@ use tokio::{
 use crate::{
     SharedState,
     discord::{
-        OAuthError, Response, ResponseCommands, Session,
+        Event, EventData, OAuthError, Response, ResponseCommands, Session,
         frames::{ReadError, WriteError, read_frame, write_frame},
         payload::{Commands, Payload},
+        session::CacheWriteError,
     },
-    ipc::{Command, EventData, command::Event},
+    ipc::Command,
 };
 
 pub struct Client {
@@ -34,6 +35,8 @@ pub enum ConnectionError {
     Authenticate(#[from] OAuthError),
     #[error("Failed to authorize: {0}")]
     Authorize(#[from] AuthorizationError),
+    #[error("Failed to write Cache: {0}")]
+    CacheWrite(#[from] CacheWriteError),
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -50,10 +53,9 @@ pub enum AuthorizationError {
 
 impl Client {
     pub async fn connect(client_id: &str, client_secret: &str) -> Result<Self, ConnectionError> {
-        let stream =
-            UnixStream::connect("/var/folders/t8/8xvn4bvd3pg57t3qy12wm00c0000gn/T/discord-ipc-1")
-                .await
-                .map_err(ConnectionError::Io)?;
+        let stream = UnixStream::connect("/run/user/1000/discord-ipc-0")
+            .await
+            .map_err(ConnectionError::Io)?;
         tracing::info!("Connected to socket");
 
         let mut client = Client { stream };
@@ -72,7 +74,11 @@ impl Client {
                 let auth_code = client.authorize(client_id).await?;
 
                 tracing::info!("Getting access token");
-                Session::from_auth_code(auth_code, client_id, client_secret).await?
+                let session = Session::from_auth_code(auth_code, client_id, client_secret).await?;
+
+                tracing::info!("Caching session");
+                session.cache().await?;
+                session
             }
         };
 
@@ -156,33 +162,97 @@ impl Client {
     ) {
         let (mut discord_rx, mut discord_tx) = self.to_split();
 
+        // Subscribe to events
+        let events = vec![Event::VoiceSettingsUpdate, Event::VoiceChannelSelect];
+        for event in events {
+            let payload = event.subscribe();
+            write_frame(&mut discord_tx, 1, payload)
+                .await
+                .expect("Failed to subscribe to event");
+        }
+
+        write_frame(
+            &mut discord_tx,
+            1,
+            Commands::GetSelectedVoiceChannel.as_payload(),
+        )
+        .await
+        .expect("Failed to send GetSelectedVoiceChannel command to Discord");
+
         loop {
             tokio::select! {
                 res = read_frame(&mut discord_rx) => {
-                    if let Ok(msg) = res {
-                        // TODO: Parse message
-                        tracing::info!("Received message from Discord: {:?}", msg);
+                    if let Ok((_, msg)) = res {
+                        // Check if it has a nonce and it isnt Null (it is a response to a command)
+                        if msg.get("nonce").is_some() && msg.get("nonce").unwrap().is_string() {
+                            // Parse it as a response
+                            let Ok(response) = serde_json::from_value::<Response>(msg.clone()) else {
+                                // tracing::warn!("Failed to parse response: {:?}", msg);
+                                continue;
+                            };
+
+                            match response.cmd {
+                                ResponseCommands::GetSelectedVoiceChannel { channel_id, guild_id } => {
+                                    state.write().await.set_voice_channel(channel_id, guild_id);
+                                },
+                                _ => {
+                                    tracing::warn!("Unexpected response: {:?}", response.cmd);
+                                }
+                            }
+
+                            continue;
+                        }
+
+                        // Only parsing events
+                        let Ok(event) = serde_json::from_value::<EventData>(msg.clone()) else {
+                            tracing::warn!("Failed to parse event: {:?}", msg);
+                            continue;
+                        };
+
+                        match &event {
+                            EventData::VoiceSettingsUpdate { mute, deaf } => {
+                                state.write().await.set_audio_status(*mute, *deaf);
+                            },
+                            EventData::VoiceChannelSelect { channel_id, guild_id } => {
+                                state.write().await.set_voice_channel(channel_id.clone(), guild_id.clone());
+                            }
+                        };
+
+                        // Log the state
+                        let (is_muted, is_deafened) = state.read().await.audio_status();
+                        let (channel_id, guild_id) = state.read().await.voice_channel().unwrap_or((String::from("None"), String::from("None")));
+                        tracing::info!("State updated: is_muted={}, is_deafened={}, channel_id={}, guild_id={}", is_muted, is_deafened, channel_id, guild_id);
+
+                        match broadcast_tx.send(event) {
+                            Ok(_) => {},
+                            Err(e) => {
+                                tracing::warn!("Failed to broadcast event: {:?}", e);
+                            }
+                        };
+
                     }
                 }
 
                 Some(msg) = mpsc_rx.recv() => {
                     let payload: serde_json::Value = match msg {
                         Command::ToggleMute => {
-                            let (is_muted, is_deafend) = state.read().await.audio_status();
+                            let (is_muted, _) = state.read().await.audio_status();
 
-                            Commands::SetVoiceSettings { mute: !is_muted, deaf: is_deafend }.as_payload().into()
+                            Commands::SetVoiceSettings { mute: Some(!is_muted), deaf: None }.as_payload().into()
                         },
                         Command::ToggleDeafen => {
-                            let (is_muted, is_deafend) = state.read().await.audio_status();
+                            let (_, is_deafend) = state.read().await.audio_status();
 
-                            Commands::SetVoiceSettings { mute: is_muted, deaf: !is_deafend }.as_payload().into()
+                            tracing::info!("Got deafen request, currently {}", is_deafend);
+
+                            Commands::SetVoiceSettings { mute: None, deaf: Some(!is_deafend) }.as_payload().into()
                         },
-                        Command::Subscribe(event) => {
-                            event.subscribe()
-                        },
-                        Command::Unsubscribe(event) => {
-                            event.unsubscribe()
-                        }
+                        // Command::Subscribe(event) => {
+                        //     event.subscribe()
+                        // },
+                        // Command::Unsubscribe(event) => {
+                        //     event.unsubscribe()
+                        // }
                     };
 
                     write_frame(&mut discord_tx, 1, payload).await.expect("Failed to send command to Discord");
@@ -191,3 +261,5 @@ impl Client {
         }
     }
 }
+
+// TODO: A handle channel change function that updates the state, unsubscribes from a channel, and then subscribes to the new one

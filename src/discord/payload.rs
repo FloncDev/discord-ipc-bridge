@@ -35,9 +35,12 @@ pub enum Commands {
         access_token: String,
     },
     SetVoiceSettings {
-        mute: bool,
-        deaf: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mute: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        deaf: Option<bool>,
     },
+    GetSelectedVoiceChannel,
 }
 
 impl Commands {

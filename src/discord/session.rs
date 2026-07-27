@@ -33,6 +33,14 @@ pub enum CacheError {
     TokenExchange(#[from] reqwest::Error),
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum CacheWriteError {
+    #[error("Failed to write cache file: {0}")]
+    Read(#[from] std::io::Error),
+    #[error("Failed to serialize cache file: {0}")]
+    Serialize(#[from] serde_json::Error),
+}
+
 impl Session {
     pub async fn from_auth_code(
         auth_code: String,
@@ -109,5 +117,15 @@ impl Session {
             expires_at,
             refresh_token: response.refresh_token,
         })
+    }
+
+    pub async fn cache(&self) -> Result<(), CacheWriteError> {
+        let cache_path = std::env::var("DISCORD_SESSION_CACHE").unwrap_or_else(|_| ".".to_string());
+        let cache_file_path = std::path::Path::new(&cache_path).join("session_cache.json");
+
+        let file = tokio::fs::File::create(cache_file_path).await?;
+        serde_json::to_writer(file.into_std().await, &self)?;
+
+        Ok(())
     }
 }
