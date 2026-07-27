@@ -14,7 +14,7 @@
       rust-overlay,
       utils,
     }:
-    utils.lib.eachDefaultSystem (
+    (utils.lib.eachDefaultSystem (
       system:
       let
         overlays = [ (import rust-overlay) ];
@@ -84,5 +84,50 @@
           '';
         };
       }
-    );
+    ))
+    // {
+      nixosModules.default =
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
+        let
+          cfg = config.services.discord-ipc-bridge;
+        in
+        {
+          options.services.discord-ipc-bridge = {
+            enable = lib.mkEnableOption "Discord IPC Bridge Service";
+
+            environmentFile = lib.mkOption {
+              type = lib.types.nullOr lib.types.path;
+              default = null;
+              description = "Path to an environment file containing secrets. (e.g., CLIENT_ID and CLIENT_SECRET)";
+            };
+
+            environment = lib.mkOption {
+              type = lib.types.attrsOf lib.types.str;
+              default = { };
+              description = "Non-sensitive environment variables.";
+            };
+          };
+
+          config = lib.mkIf cfg.enable {
+            systemd.user.services.discord-ipc-bridge = {
+              description = "Discord IPC Bridge Daemon";
+              wantedBy = [ "graphical-session.target" ];
+
+              serviceConfig = {
+                ExecStart = "${self.packages.${pkgs.system}.default}/bin/discord-ipc-bridge";
+                Restart = "on-failure";
+
+                EnvironmentFile = lib.optional (cfg.environmentFile != null) cfg.environmentFile;
+              };
+
+              environment = cfg.environment;
+            };
+          };
+        };
+    };
 }
