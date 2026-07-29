@@ -1,5 +1,7 @@
 use serde::Deserialize;
 
+use crate::discord::events::User;
+
 #[derive(Deserialize, Debug)]
 pub struct Response {
     #[serde(flatten)]
@@ -14,6 +16,9 @@ pub enum Commands {
     Authorize {
         code: String,
     },
+    Authenticate {
+        user: User,
+    },
     Error {
         code: u32,
         message: String,
@@ -22,5 +27,13 @@ pub enum Commands {
         guild_id: Option<String>,
         #[serde(rename = "id")]
         channel_id: Option<String>,
+    },
+    Subscribe {
+        #[serde(rename = "evt")]
+        event: String,
+    },
+    Unsubscribe {
+        #[serde(rename = "evt")]
+        event: String,
     },
 }

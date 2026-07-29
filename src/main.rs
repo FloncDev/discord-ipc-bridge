@@ -15,6 +15,7 @@ async fn main() {
     let client_id = std::env::var("CLIENT_ID").expect("CLIENT_ID not set");
     let client_secret = std::env::var("CLIENT_SECRET").expect("CLIENT_SECRET not set");
 
+    // TODO: Wait for IPC socket to be there, discord may not have launched yet
     let client = Client::connect(&client_id, &client_secret)
         .await
         .expect("Failed to connect to Discord IPC");
@@ -27,17 +28,20 @@ async fn main() {
     // tokio::spawn(async move {
     //     let broadcast_rx = broadcast_tx.subscribe();
     //     while let Ok(event) = broadcast_rx.recv().await {
-    //         tracing::info!("Received broadcast event: {event:?}");
+    //         tracing::debug!("Received broadcast event: {event:?}");
     //     }
     // });
 
     // Run the client
+    let user = client.user.clone().unwrap();
+
+    let cloned_state = state.clone();
     let client_handle = tokio::spawn(async move {
-        client.run(state, broadcast_tx, mpsc_rx).await;
+        client.run(cloned_state, broadcast_tx, mpsc_rx).await;
     });
 
     let ipc_handle = tokio::spawn(async move {
-        run_server(broadcast_rx, mpsc_tx).await;
+        run_server(state, broadcast_rx, mpsc_tx, user).await;
     });
 
     // let _ = cmd_tx.send(Command::ToggleMute).await;

@@ -6,14 +6,20 @@ use tokio::{
     sync::{broadcast, mpsc},
 };
 
-use crate::{discord::EventData, ipc::Command};
+use crate::{
+    SharedState,
+    discord::{EventData, events::User},
+    ipc::Command,
+};
 
 // TODO: Probably have this behind an env variable
 static SOCKET_PATH: &str = "/run/user/1000/discord-bridge";
 
 pub async fn run_server(
+    state: SharedState,
     broadcast_rx: broadcast::Receiver<EventData>,
     mpsc_tx: mpsc::Sender<Command>,
+    user: User,
 ) -> ! {
     if Path::new(SOCKET_PATH).exists() {
         let _ = tokio::fs::remove_file(SOCKET_PATH).await;
@@ -29,9 +35,23 @@ pub async fn run_server(
 
     loop {
         match listener.accept().await {
-            Ok((stream, addr)) => {
+            Ok((mut stream, addr)) => {
                 let mpsc_tx = mpsc_tx.clone();
                 let broadcast_rx = broadcast_rx.resubscribe();
+
+                let channel_id = { state.read().await.channel_id.clone() };
+
+                let user_json = serde_json::json!({
+                    "evt": "INIT",
+                    "data": {
+                        "user": user,
+                        "channel_id": channel_id
+                    }
+                });
+
+                let _ = stream.write_all(user_json.to_string().as_bytes()).await;
+                let _ = stream.write_all(b"\n").await;
+                let _ = stream.flush().await;
 
                 tokio::spawn(async move {
                     tracing::info!(peer = ?addr, "Accepted connection");

@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 pub mod discord;
 pub mod ipc;
 
+#[derive(Debug)]
 pub struct State {
     pub is_muted: bool,
     pub is_deafened: bool,
