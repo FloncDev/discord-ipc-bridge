@@ -235,11 +235,13 @@ impl Client {
                                     }
                                 },
                                 ResponseCommands::Subscribe { event } => {
-                                    tracing::info!("Subscribed to event: {:?}", event);
+                                    // tracing::info!("Subscribed to event: {:?}", event);
+                                    tracing::info!(event = event, "Subscribed");
                                 },
                                 ResponseCommands::Unsubscribe { event } => {
-                                    tracing::info!("Unsubscribed from event: {:?}", event);
+                                    tracing::info!(event = event, "Unsubscribed");
                                 },
+                                ResponseCommands::SetVoiceSettings { .. } => {},
                                 _ => {
                                     tracing::warn!("Unexpected response: {:?}", response.cmd);
                                 }
@@ -267,7 +269,7 @@ impl Client {
                                 }
                             },
                             event => {
-                                tracing::info!("Received event: {:?}", event);
+                                tracing::debug!("Received event: {:?}", event);
                             }
                         };
 

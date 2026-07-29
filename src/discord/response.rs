@@ -36,4 +36,9 @@ pub enum Commands {
         #[serde(rename = "evt")]
         event: String,
     },
+    // Dont need to handle it because we get same data from VoiceStatusUpdate event
+    SetVoiceSettings {
+        mute: bool,
+        deaf: bool,
+    },
 }
