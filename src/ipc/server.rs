@@ -12,8 +12,17 @@ use crate::{
     ipc::Command,
 };
 
-// TODO: Probably have this behind an env variable
-static SOCKET_PATH: &str = "/run/user/1000/discord-bridge";
+fn get_socket_path() -> String {
+    if let Ok(path) = dotenvy::var("IPC_socket_path") {
+        return path;
+    }
+
+    if let Ok(path) = dotenvy::var("XDG_RUNTIME_DIR") {
+        return format!("{}/discord-bridge", path);
+    }
+
+    "/tmp/discord-bridge".into()
+}
 
 pub async fn run_server(
     state: SharedState,
@@ -21,17 +30,19 @@ pub async fn run_server(
     mpsc_tx: mpsc::Sender<Command>,
     user: User,
 ) -> ! {
-    if Path::new(SOCKET_PATH).exists() {
-        let _ = tokio::fs::remove_file(SOCKET_PATH).await;
+    let socket_path = get_socket_path();
+
+    if Path::new(&socket_path).exists() {
+        let _ = tokio::fs::remove_file(&socket_path).await;
     }
 
-    let listener = UnixListener::bind(SOCKET_PATH)
+    let listener = UnixListener::bind(&socket_path)
         .inspect_err(|e| {
-            tracing::error!(path = SOCKET_PATH, error = %e, "Failed to bind to socket");
+            tracing::error!(path = &socket_path, error = %e, "Failed to bind to socket");
         })
         .unwrap();
 
-    tracing::info!(path = SOCKET_PATH, "Listening for connections");
+    tracing::info!(path = &socket_path, "Listening for connections");
 
     loop {
         match listener.accept().await {
