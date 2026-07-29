@@ -73,8 +73,6 @@ impl Session {
             refresh_token: response.refresh_token,
         };
 
-        // TODO: Cache session
-
         Ok(session)
     }
 

@@ -283,7 +283,6 @@ impl Client {
     }
 }
 
-// TODO: A handle channel change function that updates the state, unsubscribes from a channel, and then subscribes to the new one
 async fn handle_channel_change(
     state: SharedState,
     discord_tx: &mut tokio::net::unix::OwnedWriteHalf,
