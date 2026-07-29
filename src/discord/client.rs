@@ -1,7 +1,10 @@
+use std::{path::Path, time::Duration};
+
 use serde_json::json;
 use tokio::{
     net::UnixStream,
     sync::{broadcast, mpsc},
+    time::sleep,
 };
 
 use crate::{
@@ -57,11 +60,32 @@ pub enum AuthorizationError {
     Failed(String),
 }
 
+async fn wait_for_socket<P: AsRef<Path>>(path: P) -> UnixStream {
+    let mut delay = Duration::from_millis(10);
+
+    tracing::info!("Waiting for socket...");
+
+    loop {
+        match UnixStream::connect(&path).await {
+            Ok(stream) => return stream,
+            Err(_) => {
+                sleep(delay).await;
+                delay = (delay * 2).min(Duration::from_secs(1));
+            }
+        }
+    }
+}
+
 impl Client {
     pub async fn connect(client_id: &str, client_secret: &str) -> Result<Self, ConnectionError> {
-        let stream = UnixStream::connect("/run/user/1000/discord-ipc-0")
-            .await
-            .map_err(ConnectionError::Io)?;
+        // TODO: Implement all of the discord ipc paths if this breaks
+        let path = dotenvy::var("XDG_RUNTIME_DIR").expect("Could not find runtime dir");
+
+        // let stream = UnixStream::connect(format!("{}/discord-ipc-0", path))
+        //     .await
+        //     .map_err(ConnectionError::Io)?;
+
+        let stream = wait_for_socket(format!("{}/discord-ipc-0", path)).await;
         tracing::info!("Connected to socket");
 
         let mut client = Client { stream, user: None };

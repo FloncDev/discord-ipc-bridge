@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 chrono = { version = "0.4.45", features = ["serde"] }
+directories = "6.0.0"
 dotenvy = "0.15.7"
 reqwest = { version = "0.13.4", features = ["json", "form"] }
 serde = { version = "1.0.228", features = ["derive"] }

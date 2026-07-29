@@ -41,6 +41,16 @@ pub enum CacheWriteError {
     Serialize(#[from] serde_json::Error),
 }
 
+fn get_cache_path() -> std::path::PathBuf {
+    dotenvy::var("DISCORD_SESSION_CACHE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            directories::ProjectDirs::from("com", "flonc", "discord-ipc-bridge")
+                .map(|dirs| dirs.cache_dir().to_path_buf())
+                .unwrap_or_else(|| ".".into())
+        })
+}
+
 impl Session {
     pub async fn from_auth_code(
         auth_code: String,
@@ -78,8 +88,10 @@ impl Session {
 
     pub async fn from_cache(client_id: &str, client_secret: &str) -> Result<Session, CacheError> {
         // Try to read from cache file
-        let cache_path = std::env::var("DISCORD_SESSION_CACHE").unwrap_or_else(|_| ".".to_string());
-        let cache_file_path = std::path::Path::new(&cache_path).join("session_cache.json");
+        let cache_path = get_cache_path();
+        let cache_file_path = cache_path.join("session_cache.json");
+
+        tracing::info!(path = ?cache_file_path, "Reading session from cache");
 
         let file = tokio::fs::File::open(cache_file_path).await?;
         let session: Session = serde_json::from_reader(file.into_std().await)?;
@@ -118,9 +130,10 @@ impl Session {
     }
 
     pub async fn cache(&self) -> Result<(), CacheWriteError> {
-        let cache_path = std::env::var("DISCORD_SESSION_CACHE").unwrap_or_else(|_| ".".to_string());
-        let cache_file_path = std::path::Path::new(&cache_path).join("session_cache.json");
+        let cache_path = get_cache_path();
+        let cache_file_path = cache_path.join("session_cache.json");
 
+        tokio::fs::create_dir_all(&cache_path).await?;
         let file = tokio::fs::File::create(cache_file_path).await?;
         serde_json::to_writer(file.into_std().await, &self)?;
 
